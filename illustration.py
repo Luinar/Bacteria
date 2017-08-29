@@ -16,6 +16,8 @@ from mpacts.contact.detectors.multigrid import MultiGridContactDetector
 from mpacts.contact.models.collision.linearforce.linearforce_capsulewithtorque import LinearForceForCapsulesWithTorque
 
 from mpacts.core.arrays import create_array
+from mpacts.core.command import ExecuteTimeInterval
+from mpacts.core.configuration import parallel_configuration
 from mpacts.core.simulation import Simulation
 from mpacts.core.units import unit_registry as u
 from mpacts.core.valueproperties import Variable, VariableFunction
@@ -34,7 +36,7 @@ import numpy as np
 # Global settings
 #--------------------------------------------------------------
 rng_seed = 814559961    # seed used for all (internal, numpy, python.random) PRNG generators
-thread_count = 6        # number of threads when multithreaded  
+thread_count = 4        # number of threads when multithreaded  
 grainsize = 64          # number of contact per single thread when multithreaded
 
 set_random_seed( rng_seed )
@@ -75,7 +77,7 @@ c_rot  = Variable("c_friction_rot", params, value = -0.447, description = "Corre
 
 #Settings of the setup 
 c = 0.01 * u("1/um^3") # Concentration of bacteria - cubic latice is approx 0.2 
-R = 50 * u("um") #Radius of the colony 
+R = 20 * u("um") #Radius of the colony 
 
 #Number of bacteria is drawn from poisson distribution
 N = np.random.poisson( 4./3.*np.pi*R**3*c ) 
@@ -129,11 +131,11 @@ ForwardEuler_Generic("bacteria_velocity_integration", sim, pc = bacteria("nodes"
 LinearStretchingTorqueCommand("bacteria_elasticity", sim, pc = bacteria("segments"), k_array = bacteria("segments")["stiffness"], l0_array = bacteria("segments")["equilibrium_length"] )
 
 #Repulsion
-#model_repulsion = LinearForceForCapsulesWithTorque("bacteria_repulsion", sim, pc1 = bacteria("segments"), pc2 = bacteria("segments"), k = bacteria_repulsion )
-#MultiGridContactDetector("bacteria_repulsion_cd", sim, cmodel = model_repulsion, keep_distance = keep_distance_bacteria, update_every = freq )
+model_repulsion = LinearForceForCapsulesWithTorque("bacteria_repulsion", sim, pc1 = bacteria("segments"), pc2 = bacteria("segments"), k = bacteria_repulsion )
+MultiGridContactDetector("bacteria_repulsion_cd", sim, cmodel = model_repulsion, keep_distance = keep_distance_bacteria, update_every = freq )
 
 #Writing out all data
-writer = bacteria.VTKWriterCmd( executeEvery = int(np.ceil(snapshotevery/dt)), directory = "./" ) 
+writer = bacteria.VTKWriterCmd( gate = ExecuteTimeInterval( sim = sim, interval = snapshotevery.to("s").magnitude ), directory = "./" ) 
 writer.select_all(True) 
 
 #--------------------------------------------------------------
@@ -247,5 +249,5 @@ sim.run_until( ( 10 * u("s") ).to("s").magnitude )
 #sim.run_until( ( 10 * u("s") ).to("s").magnitude ) 
 
 print "Simulation start ..." 
-sim.set_property("timestep", dt )
+#sim.set_property("timestep", dt )
 sim.run_until( endTime.to("s").magnitude ) 
