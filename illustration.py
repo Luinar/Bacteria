@@ -13,7 +13,7 @@ from mpacts.commands.time_evolution.integration import ComputeVelocitiesFromSegm
 
 from mpacts.contact.detectors.multigrid import MultiGridContactDetector
 
-from mpacts.contact.models.collision.linearforce.linearforce_capsulewithtorque import LinearForceForCapsulesWithTorque
+from mpacts.contact.models.collision.hertz.hertz_capsulewithtorque import HertzModelForCapsulesWithTorque
 
 from mpacts.core.arrays import create_array
 from mpacts.core.command import ExecuteTimeInterval
@@ -36,7 +36,7 @@ import numpy as np
 # Global settings
 #--------------------------------------------------------------
 rng_seed = 814559961    # seed used for all (internal, numpy, python.random) PRNG generators
-thread_count = 4        # number of threads when multithreaded  
+thread_count = 6        # number of threads when multithreaded  
 grainsize = 64          # number of contact per single thread when multithreaded
 
 set_random_seed( rng_seed )
@@ -94,9 +94,8 @@ l_max = 5. * u("um")
 #Elastic properies of bacteria
 tau = Variable("bacteria_tau", params, value = 100. * u("ms"), description = "Relaxation time of longitudinal deformations. Has to be much bigger than dt." )
 E = Variable("bacteria_Youngs_modulus", params, value = 300 * u("kPa"), description = "Stiffness of bacteria." ) 
+nu = Variable("bacteria_Poisson_ratio", params, value = 0, description = "Poisson ratio of bacteria." ) 
 
-#Estimate base on youngs modulus and estimate of the affected area
-bacteria_repulsion = VariableFunction("bacteria_repulsion", params, function = " 0.05 * $bacteria_Youngs_modulus$ * %g " % r_min.to("m").magnitude, description = "Estimate for repulsion based on shortest distance" )
 #On the level of 4 sigma 
 keep_distance_bacteria = VariableFunction("bacteria_bacteria_keep_distance", params, function = " 4 * math.sqrt( 6. * $kBT$ * $dt$ * $update_every$ / ( 2. * math.pi * $eta$ * %g / ( math.log( 2. * %g / %g ) + $c_friction_para$ ) ) ) " % (l_min.to("m").magnitude, l_min.to("m").magnitude, r_min.to("m").magnitude ), description = "Estimate on keep distance based on diffusion on the level of 4 sigma." )
 
@@ -131,7 +130,7 @@ ForwardEuler_Generic("bacteria_velocity_integration", sim, pc = bacteria("nodes"
 LinearStretchingTorqueCommand("bacteria_elasticity", sim, pc = bacteria("segments"), k_array = bacteria("segments")["stiffness"], l0_array = bacteria("segments")["equilibrium_length"] )
 
 #Repulsion
-model_repulsion = LinearForceForCapsulesWithTorque("bacteria_repulsion", sim, pc1 = bacteria("segments"), pc2 = bacteria("segments"), k = bacteria_repulsion )
+model_repulsion = HertzModelForCapsulesWithTorque("bacteria_repulsion", sim, pc1 = bacteria("segments"), pc2 = bacteria("segments"), E1 = E, E2 = E, nu1 = nu, nu2 = nu )
 MultiGridContactDetector("bacteria_repulsion_cd", sim, cmodel = model_repulsion, keep_distance = keep_distance_bacteria, update_every = freq )
 
 #Writing out all data
