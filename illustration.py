@@ -1,7 +1,12 @@
+from mpacts.commands.force.body import CentralPullCommand
 from mpacts.commands.force.body import CentrifugalTorqueCommand
 from mpacts.commands.force.body import LinearStretchingTorqueCommand
+from mpacts.commands.force.constraints.virtualforces import AddNodeForcesToSegmentForcesCommand
+from mpacts.commands.force.constraints.virtualforces import AddNodeForcesToSegmentTorqueCommand
 from mpacts.commands.force.random import BrownianTranslationForcesCommand
 from mpacts.commands.force.random import BrownianRotationalForcesCommand
+
+from mpacts.commands.geometry.cylinder import ComputeCylinderIndexListCommand
 
 from mpacts.commands.misc.frictionmatrices import AssembleCylinderFrictionCoefficientsCommand
 from mpacts.commands.misc.frictionmatrices import AssembleCylinderRotationalFrictionCoefficientsCommand
@@ -16,6 +21,7 @@ from mpacts.contact.detectors.multigrid import MultiGridContactDetector
 from mpacts.contact.models.collision.hertz.hertz_capsulewithtorque import HertzModelForCapsulesWithTorque
 
 from mpacts.core.arrays import create_array
+from mpacts.core.command import ExecuteOnce
 from mpacts.core.command import ExecuteTimeInterval
 from mpacts.core.configuration import parallel_configuration
 from mpacts.core.simulation import Simulation
@@ -36,8 +42,8 @@ import numpy as np
 # Global settings
 #--------------------------------------------------------------
 rng_seed = 814559961    # seed used for all (internal, numpy, python.random) PRNG generators
-thread_count = 6        # number of threads when multithreaded  
-grainsize = 64          # number of contact per single thread when multithreaded
+thread_count = 12       # number of threads when multithreaded  
+grainsize = 128         # number of contact per single thread when multithreaded
 
 set_random_seed( rng_seed )
 SetContactDataStorage( "Vector" )
@@ -53,7 +59,7 @@ except:
 # Simulation and global constants 
 #--------------------------------------------------------------
 dt = 0.1 * u("ms")
-snapshotevery = 1 * u("s")  
+snapshotevery = 0.1 * u("s")  
 endTime = 1 * u("min")  
 
 sim = Simulation("Simulation", timestep = dt )
@@ -66,7 +72,7 @@ Variable("T", params, value = 303.15 * u("K"), description = "Temperature of the
 kBT = VariableFunction("kBT", params, function = "$T$ * $k_B$", description = "Temperature of environment in Joules. [J]" )
 
 #Timestep
-Variable("dt", params, value = sim.get_property("timestep"), description = "Simulation timestep. [s]" ) 
+dt_var = Variable("dt", params, value = sim.get_property("timestep"), description = "Simulation timestep. [s]" ) 
 #Contact detection refresh rate - how often is done the full contact detection
 freq = Variable("update_every", params, value = 100, description = "Frequency of contact detection. [number of timesteps]" )
 
@@ -76,16 +82,16 @@ c_perp = Variable("c_friction_perp", params, value = 0.886, description = "Corre
 c_rot  = Variable("c_friction_rot", params, value = -0.447, description = "Correction coefficient for the drag of the polymer, rotational component component. [1]" )
 
 #Settings of the setup 
-c = 0.01 * u("1/um^3") # Concentration of bacteria - cubic latice is approx 0.2 
-R = 20 * u("um") #Radius of the colony 
+c = 0.05 * u("1/um^3") # Concentration of bacteria - cubic latice is approx 0.2 
+R = 25 * u("um") #Radius of the colony 
 
 #Number of bacteria is drawn from poisson distribution
 N = np.random.poisson( 4./3.*np.pi*R**3*c ) 
 
 #Minimal and maximal radius and length 
-r_min = 0.25 * u("um")
+r_min = 0.5 * u("um")
 r_max = 1. * u("um") 
-l_min = 1. * u("um")
+l_min = 2. * u("um")
 l_max = 5. * u("um")
 
 #--------------------------------------------------------------
@@ -93,8 +99,12 @@ l_max = 5. * u("um")
 #--------------------------------------------------------------
 #Elastic properies of bacteria
 tau = Variable("bacteria_tau", params, value = 100. * u("ms"), description = "Relaxation time of longitudinal deformations. Has to be much bigger than dt." )
-E = Variable("bacteria_Youngs_modulus", params, value = 300 * u("kPa"), description = "Stiffness of bacteria." ) 
+#Artificially decreased - real value is around 300 kPa 
+E = Variable("bacteria_Youngs_modulus", params, value = 3 * u("kPa"), description = "Stiffness of bacteria." ) 
 nu = Variable("bacteria_Poisson_ratio", params, value = 0, description = "Poisson ratio of bacteria." ) 
+
+#Attractive force towards the center
+F_attr = Variable("bacteria_attraction_magnitude", params, value = 20 * u("fN"), description = "Magnitude of the attractive force towards the origin.") 
 
 #On the level of 4 sigma 
 keep_distance_bacteria = VariableFunction("bacteria_bacteria_keep_distance", params, function = " 4 * math.sqrt( 6. * $kBT$ * $dt$ * $update_every$ / ( 2. * math.pi * $eta$ * %g / ( math.log( 2. * %g / %g ) + $c_friction_para$ ) ) ) " % (l_min.to("m").magnitude, l_min.to("m").magnitude, r_min.to("m").magnitude ), description = "Estimate on keep distance based on diffusion on the level of 4 sigma." )
@@ -111,6 +121,11 @@ bacteria = ParticleContainer("bacteria", DeformableBody.compose( ( Node, "nodes"
 #We create an array for equilibrium length and stiffness of each bacteria
 bacteria("segments").create_array("Scalar", "equilibrium_length") 
 bacteria("segments").create_array("Scalar", "stiffness") 
+
+#Array for containing the IDs of segments which the given node is part of
+bacteria("nodes").create_array("IndexVector", "nodeIndexList")
+#and a command to fill it - as we do not add or destroy elements we need to run it only once 
+ComputeCylinderIndexListCommand("bacteria_nodes_get_segment_indices", sim, pc = bacteria("segments"), nodeIndexList = bacteria("nodes")["nodeIndexList"], gate = ExecuteOnce() )
 
 #Commands for obtaining the diffusion properties 
 AssembleCylinderFrictionCoefficientsCommand("bacteria_friction_trans_coef", sim, pc = bacteria("segments"), c_para = c_para, c_perp = c_perp, eta = eta) 
@@ -132,6 +147,13 @@ LinearStretchingTorqueCommand("bacteria_elasticity", sim, pc = bacteria("segment
 #Repulsion
 model_repulsion = HertzModelForCapsulesWithTorque("bacteria_repulsion", sim, pc1 = bacteria("segments"), pc2 = bacteria("segments"), E1 = E, E2 = E, nu1 = nu, nu2 = nu )
 MultiGridContactDetector("bacteria_repulsion_cd", sim, cmodel = model_repulsion, keep_distance = keep_distance_bacteria, update_every = freq )
+
+#Attractive potential towards the center
+CentralPullCommand("bacteria_attraction", sim, pc = bacteria("nodes"), force = F_attr )
+#Because we add those forces on nodes (we need position for that command) we need to collect it to the segment
+AddNodeForcesToSegmentForcesCommand("bacteria_transfeor_node_forces_to_segment_force", sim, pc = bacteria("segments") )
+AddNodeForcesToSegmentTorqueCommand("bacteria_transfeor_node_forces_to_segment_torque", sim, pc = bacteria("segments") )
+
 
 #Writing out all data
 writer = bacteria.VTKWriterCmd( gate = ExecuteTimeInterval( sim = sim, interval = snapshotevery.to("s").magnitude ), directory = "./" ) 
@@ -218,35 +240,42 @@ ProgressIndicator("PrintProgress", sim, print_interval=5)
 
 #Relaxation with smaller timestep first
 sim.set( timestep = 1 * u("ns" ) )
+dt_var.set_property("value", 1 * u("ns" ) )
 #sim.set_property("timestep", 1 * u("us" ) )
+print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
+sim.run_until( ( 100 * u("us") ).to("s").magnitude ) 
+
+#Relaxation with smaller timestep first
+sim.set( timestep = 10 * u("ns" ) )
+dt_var.set_property( "value", 10 * u("ns" ) )
 print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
 sim.run_until( ( 1 * u("ms") ).to("s").magnitude ) 
 
 #Relaxation with smaller timestep first
-sim.set( timestep = 10 * u("ns" ) )
+sim.set( timestep = 100 * u("ns" ) )
+dt_var.set_property( "value", 100 * u("ns" ) )
 print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
 sim.run_until( ( 10 * u("ms") ).to("s").magnitude ) 
 
 #Relaxation with smaller timestep first
-sim.set( timestep = 100 * u("ns" ) )
+sim.set( timestep = 1 * u("us" ) )
+dt_var.set_property( "value", 1 * u("us" ) )
 print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
 sim.run_until( ( 100 * u("ms") ).to("s").magnitude ) 
 
 #Relaxation with smaller timestep first
-sim.set( timestep = 1 * u("us" ) )
+sim.set( timestep = 10 * u("us" ) )
+dt_var.set_property( "value", 10 * u("us" ) )
 print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
 sim.run_until( ( 1 * u("s") ).to("s").magnitude ) 
 
 #Relaxation with smaller timestep first
-sim.set( timestep = 10 * u("us" ) )
-print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
-sim.run_until( ( 10 * u("s") ).to("s").magnitude ) 
-
-#Relaxation with smaller timestep first
-#sim.set_property("timestep", 100 * u("us" ) )
+#sim.set( timestep = 100 * u("us" ) )
+#dt_var.set_property( "value", 100 * u("us" ) )
 #print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
 #sim.run_until( ( 10 * u("s") ).to("s").magnitude ) 
 
 print "Simulation start ..." 
-#sim.set_property("timestep", dt )
+#sim.set( timestep = dt )
+#dt_var.set_property( "value", dt )
 sim.run_until( endTime.to("s").magnitude ) 
