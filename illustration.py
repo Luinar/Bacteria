@@ -58,11 +58,12 @@ except:
 #--------------------------------------------------------------
 # Simulation and global constants 
 #--------------------------------------------------------------
-dt = 0.1 * u("ms")
+dt_target = 100 * u("us") 
 snapshotevery = 0.1 * u("s")  
 endTime = 1 * u("min")  
 
-sim = Simulation("Simulation", timestep = dt )
+#Dummy timestep - will be set properly later
+sim = Simulation("Simulation", timestep = dt_target )
 params = sim("params") 
 
 #Properties of environment
@@ -71,8 +72,9 @@ Variable("k_B", params, value = 1.38e-23 * u("J/K"), description = "Boltzmann co
 Variable("T", params, value = 303.15 * u("K"), description = "Temperature of the environment. [K]" )            #30 C
 kBT = VariableFunction("kBT", params, function = "$T$ * $k_B$", description = "Temperature of environment in Joules. [J]" )
 
-#Timestep
-dt_var = Variable("dt", params, value = sim.get_property("timestep"), description = "Simulation timestep. [s]" ) 
+#Timestep and actual setting of the timestep in the simulation 
+dt = Variable("dt", params, value = sim.get_property("timestep"), description = "Simulation timestep. [s]" ) 
+sim.set( timestep = dt ) 
 #Contact detection refresh rate - how often is done the full contact detection
 freq = Variable("update_every", params, value = 100, description = "Frequency of contact detection. [number of timesteps]" )
 
@@ -100,8 +102,8 @@ l_max = 5. * u("um")
 #Elastic properies of bacteria
 tau = Variable("bacteria_tau", params, value = 100. * u("ms"), description = "Relaxation time of longitudinal deformations. Has to be much bigger than dt." )
 #Artificially decreased - real value is around 300 kPa 
-E = Variable("bacteria_Youngs_modulus", params, value = 3 * u("kPa"), description = "Stiffness of bacteria." ) 
-nu = Variable("bacteria_Poisson_ratio", params, value = 0, description = "Poisson ratio of bacteria." ) 
+E = Variable("bacteria_Youngs_modulus", params, value = 0.3 * u("kPa"), description = "Stiffness of bacteria." ) 
+nu = Variable("bacteria_Poisson_ratio", params, value = 0.5, description = "Poisson ratio of bacteria." ) 
 
 #Attractive force towards the center
 F_attr = Variable("bacteria_attraction_magnitude", params, value = 20 * u("fN"), description = "Magnitude of the attractive force towards the origin.") 
@@ -122,7 +124,7 @@ bacteria = ParticleContainer("bacteria", DeformableBody.compose( ( Node, "nodes"
 bacteria("segments").create_array("Scalar", "equilibrium_length") 
 bacteria("segments").create_array("Scalar", "stiffness") 
 
-#Array for containing the IDs of segments which the given node is part of
+#Array for containing the IDs of segments which the given node is part of (necessary for CentralPull - or more precisely for AddNodeForces... ) 
 bacteria("nodes").create_array("IndexVector", "nodeIndexList")
 #and a command to fill it - as we do not add or destroy elements we need to run it only once 
 ComputeCylinderIndexListCommand("bacteria_nodes_get_segment_indices", sim, pc = bacteria("segments"), nodeIndexList = bacteria("nodes")["nodeIndexList"], gate = ExecuteOnce() )
@@ -153,7 +155,6 @@ CentralPullCommand("bacteria_attraction", sim, pc = bacteria("nodes"), force = F
 #Because we add those forces on nodes (we need position for that command) we need to collect it to the segment
 AddNodeForcesToSegmentForcesCommand("bacteria_transfeor_node_forces_to_segment_force", sim, pc = bacteria("segments") )
 AddNodeForcesToSegmentTorqueCommand("bacteria_transfeor_node_forces_to_segment_torque", sim, pc = bacteria("segments") )
-
 
 #Writing out all data
 writer = bacteria.VTKWriterCmd( gate = ExecuteTimeInterval( sim = sim, interval = snapshotevery.to("s").magnitude ), directory = "./" ) 
@@ -239,43 +240,35 @@ for i in range(N) :
 ProgressIndicator("PrintProgress", sim, print_interval=5)
 
 #Relaxation with smaller timestep first
-sim.set( timestep = 1 * u("ns" ) )
-dt_var.set_property("value", 1 * u("ns" ) )
-#sim.set_property("timestep", 1 * u("us" ) )
+dt.set( 1 * u("ns" ) )
 print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
 sim.run_until( ( 100 * u("us") ).to("s").magnitude ) 
 
 #Relaxation with smaller timestep first
-sim.set( timestep = 10 * u("ns" ) )
-dt_var.set_property( "value", 10 * u("ns" ) )
+dt.set( 10 * u("ns" ) )
 print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
 sim.run_until( ( 1 * u("ms") ).to("s").magnitude ) 
 
 #Relaxation with smaller timestep first
-sim.set( timestep = 100 * u("ns" ) )
-dt_var.set_property( "value", 100 * u("ns" ) )
+dt.set( 100 * u("ns" ) )
 print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
 sim.run_until( ( 10 * u("ms") ).to("s").magnitude ) 
 
 #Relaxation with smaller timestep first
-sim.set( timestep = 1 * u("us" ) )
-dt_var.set_property( "value", 1 * u("us" ) )
+dt.set( 1 * u("us" ) )
 print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
 sim.run_until( ( 100 * u("ms") ).to("s").magnitude ) 
 
 #Relaxation with smaller timestep first
-sim.set( timestep = 10 * u("us" ) )
-dt_var.set_property( "value", 10 * u("us" ) )
+dt.set( 10 * u("us" ) )
 print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
 sim.run_until( ( 1 * u("s") ).to("s").magnitude ) 
 
 #Relaxation with smaller timestep first
-#sim.set( timestep = 100 * u("us" ) )
-#dt_var.set_property( "value", 100 * u("us" ) )
+#dt.set( 100 * u("us" ) )
 #print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
 #sim.run_until( ( 10 * u("s") ).to("s").magnitude ) 
 
 print "Simulation start ..." 
-#sim.set( timestep = dt )
-#dt_var.set_property( "value", dt )
+dt.set( dt_target )
 sim.run_until( endTime.to("s").magnitude ) 
