@@ -58,7 +58,7 @@ except:
 #--------------------------------------------------------------
 # Simulation and global constants 
 #--------------------------------------------------------------
-dt_target = 100 * u("us") 
+dt_target = 0.1 * u("ms") 
 snapshotevery = 0.1 * u("s")  
 endTime = 1 * u("min")  
 
@@ -263,11 +263,6 @@ sim.run_until( ( 100 * u("ms") ).to("s").magnitude )
 dt.set( 10 * u("us" ) )
 print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
 sim.run_until( ( 1 * u("s") ).to("s").magnitude ) 
-
-#Relaxation with smaller timestep first
-#dt.set( 100 * u("us" ) )
-#print "Relaxation with dt = %g s " % (sim.get_property("timestep"))  
-#sim.run_until( ( 10 * u("s") ).to("s").magnitude ) 
 
 print "Simulation start ..." 
 dt.set( dt_target )
