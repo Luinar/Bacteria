@@ -207,10 +207,13 @@ R = np.array( [ np.eye(3) * np.dot( [0,0,1] , pos_u[:,i] ) + ( 1. - np.dot( [0,0
 x = ( pos_u * r ).T
 t = np.einsum( "ijk,ki->ij", R, t )  
 
+#Sorting make it faster
+new_indices = np.argsort( x[:,0] )
+
 print "Adding bacteria ... " 
 
 #Add particles 
-for i in range(N) :
+for i in new_indices:
     p = bacteria.add_particle()
     #print "%.01f\r" % (100*(i + 0.) / N), 
 
